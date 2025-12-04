@@ -18,21 +18,27 @@ import { startRealTimeTracking } from "./services/realTimeTracking.js";
 
 dotenv.config();
 
+// Your deployed frontend URL
 const FRONTEND_URL = "https://rextro-bus-stop.vercel.app";
 
 const app = express();
 const server = http.createServer(app);
 
 // ----------------------------
-// SOCKET.IO CONFIG
+// SOCKET.IO CONFIG (Production Safe)
 // ----------------------------
 const io = new Server(server, {
   cors: {
-    origin: [FRONTEND_URL, "http://localhost:5173"],
+    origin: [
+      FRONTEND_URL,            // production frontend
+      "http://localhost:5173", // local development
+    ],
     methods: ["GET", "POST"],
     credentials: true,
   },
   transports: ["websocket", "polling"],
+  pingTimeout: 60000,   // prevent Railway timeout
+  pingInterval: 25000,  // keep connection alive
 });
 
 // ----------------------------
@@ -40,7 +46,10 @@ const io = new Server(server, {
 // ----------------------------
 app.use(
   cors({
-    origin: [FRONTEND_URL, "http://localhost:5173"],
+    origin: [
+      FRONTEND_URL,
+      "http://localhost:5173"
+    ],
     credentials: true,
   })
 );

@@ -18,6 +18,8 @@ import { startRealTimeTracking } from "./services/realTimeTracking.js";
 
 dotenv.config();
 
+const FRONTEND_URL = "https://rextro-bus-stop.vercel.app";
+
 const app = express();
 const server = http.createServer(app);
 
@@ -26,15 +28,23 @@ const server = http.createServer(app);
 // ----------------------------
 const io = new Server(server, {
   cors: {
-    origin: "*",
+    origin: [FRONTEND_URL, "http://localhost:5173"],
     methods: ["GET", "POST"],
+    credentials: true,
   },
+  transports: ["websocket", "polling"],
 });
 
 // ----------------------------
 // MIDDLEWARE
 // ----------------------------
-app.use(cors());
+app.use(
+  cors({
+    origin: [FRONTEND_URL, "http://localhost:5173"],
+    credentials: true,
+  })
+);
+
 app.use(express.json());
 
 // ----------------------------

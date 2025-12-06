@@ -8,21 +8,20 @@ const FIREBASE_GPS_URL =
 const POLL_MS = 3000;
 const MIN_SPEED = 1; // avoid infinite ETA
 
-// ----------------------------------------------------------
-// Convert "1:51 AM" → Date object (TODAY) without day rollover
-// ----------------------------------------------------------
+// Format time
 function parseExpectedToDate(time) {
   if (!time) return null;
+  const t = time.trim();
+  const d = new Date();
+  const parts = t.split(" ");
 
-  const [clock, ap] = time.split(" ");
-  let [h, m] = clock.split(":").map(Number);
-  const ampm = ap?.toUpperCase();
+  let [h, m] = parts[0].split(":").map(Number);
+  const ampm = parts[1]?.toUpperCase();
 
   if (ampm === "PM" && h !== 12) h += 12;
   if (ampm === "AM" && h === 12) h = 0;
 
-  const d = new Date();
-  d.setHours(h, m, 0, 0); // NO shifting to next day
+  d.setHours(h, m, 0, 0);
   return d;
 }
 
@@ -30,17 +29,19 @@ function normalizeName(name) {
   return name.trim().replace(/\s+/g, " ").toLowerCase();
 }
 
-// ----------------------------------------------------------
-// OSRM — Road distance
-// ----------------------------------------------------------
+// ------------------------------
+// OSRM (road distance only)
+// ------------------------------
 async function getRoadDistance(busLat, busLng, stopLat, stopLng) {
   try {
     const URL = `http://router.project-osrm.org/route/v1/driving/${busLng},${busLat};${stopLng},${stopLat}?overview=false`;
 
     const res = await axios.get(URL);
+
     if (!res.data.routes) return null;
 
     const distanceKm = res.data.routes[0].distance / 1000;
+
     return distanceKm;
   } catch (err) {
     console.log("OSRM error:", err.message);
@@ -48,15 +49,16 @@ async function getRoadDistance(busLat, busLng, stopLat, stopLng) {
   }
 }
 
-// ----------------------------------------------------------
-// REALTIME TRACKING ENGINE
-// ----------------------------------------------------------
+// ------------------------------
+// REALTIME TRACKING
+// ------------------------------
 export function startRealTimeTracking(io) {
   io.on("connection", (socket) => {
     console.log("⚡ Client connected:", socket.id);
 
     socket.data.stop = null;
 
+    // User selected halt
     socket.on("requestTimetable", (data) => {
       socket.data.stop = {
         stopName: data.stopName,
@@ -70,7 +72,7 @@ export function startRealTimeTracking(io) {
       if (!socket.data.stop) return;
 
       // ------------------------------
-      // 1. Read GPS from Firebase
+      // 1. READ GPS FROM FIREBASE
       // ------------------------------
       let gps;
       try {
@@ -84,10 +86,10 @@ export function startRealTimeTracking(io) {
 
       const busLat = Number(gps.latitude);
       const busLng = Number(gps.longitude);
-      const busSpeed = Math.max(Number(gps.speed) || 0, MIN_SPEED);
+      const busSpeed = Math.max(Number(gps.speed) || 0, MIN_SPEED); // km/h
 
       // ------------------------------
-      // 2. Road distance
+      // 2. GET ROAD DISTANCE FROM OSRM
       // ------------------------------
       const roadKm = await getRoadDistance(
         busLat,
@@ -99,7 +101,7 @@ export function startRealTimeTracking(io) {
       if (!roadKm) return;
 
       // ------------------------------
-      // 3. ETA from real-time speed
+      // 3. ETA USING REAL BUS SPEED
       // ------------------------------
       let etaMin = Math.round(roadKm / (busSpeed / 60));
       if (etaMin < 1) etaMin = 1;
@@ -112,7 +114,7 @@ export function startRealTimeTracking(io) {
       });
 
       // ------------------------------
-      // 4. Get scheduled times
+      // 4. GET SCHEDULE FROM DATABASE
       // ------------------------------
       const haltName = normalizeName(socket.data.stop.stopName);
 
@@ -134,7 +136,6 @@ export function startRealTimeTracking(io) {
         return;
       }
 
-      // Convert each schedule to a date TODAY
       const buses = halt.buses.map((b) => ({
         busNumber: b.busNumber,
         expectedTime: b.expectedTime,
@@ -143,33 +144,19 @@ export function startRealTimeTracking(io) {
 
       const now = new Date();
 
-      // ------------------------------
-      // 5. Select bus closest to NOW (late or early)
-      // ------------------------------
-      const nextBus = buses
-        .map((b) => ({
-          ...b,
-          diff: Math.abs(b.expectedDate - now),
-        }))
-        .sort((a, b) => a.diff - b.diff)[0]; // closest schedule
+      const nextBus =
+        buses
+          .filter((b) => b.expectedDate >= now)
+          .sort((a, b) => a.expectedDate - b.expectedDate)[0] || buses[0];
 
       // ------------------------------
-      // 6. Compute delay
+      // 5. BUILD STATUS STRING
       // ------------------------------
-      const scheduledMin =
-        nextBus.expectedDate.getHours() * 60 + nextBus.expectedDate.getMinutes();
-
-      const expectedMin =
-        actualArrival.getHours() * 60 + actualArrival.getMinutes();
-
-      const diff = expectedMin - scheduledMin;
-
-      let status = "On Time";
-      if (diff > 1) status = `${diff} Min Delay`;
-      else if (diff < -1) status = `${Math.abs(diff)} Min Early`;
+      let status =
+        etaMin > 1 ? `${etaMin} Min Delay` : etaMin <= -1 ? "Early" : "Ontime";
 
       // ------------------------------
-      // 7. Send result
+      // 6. SEND RESULT
       // ------------------------------
       socket.emit("timetableUpdate", [
         {

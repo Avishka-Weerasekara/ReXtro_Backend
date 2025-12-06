@@ -1,13 +1,15 @@
 import axios from "axios";
 import BusSchedule from "../models/BusSchedule.js";
 
+process.env.TZ = "Asia/Colombo"; // ✅ FORCE SRI LANKA TIME
+
 const FIREBASE_GPS_URL =
   "https://bustracker-4624a-default-rtdb.asia-southeast1.firebasedatabase.app/bus1.json";
 
 const POLL_MS = 3000;
 const MIN_SPEED = 5; // Prevent insane delays when GPS speed = 0
 
-// Normalize halt name
+// ✅ Normalize halt name
 function normalizeName(name) {
   return name.trim().replace(/\s+/g, " ").toLowerCase();
 }
@@ -19,26 +21,34 @@ async function getRoadDistance(busLat, busLng, stopLat, stopLng) {
     const res = await axios.get(URL);
 
     if (!res.data.routes?.length) return 1;
-
     return res.data.routes[0].distance / 1000;
   } catch (err) {
     console.log("OSRM error:", err.message);
-    return 1; // ✅ fallback so system NEVER breaks
+    return 1; // ✅ NEVER break system
   }
 }
 
-// ✅ Convert "HH:MM" → Date(today)
+// ✅ Convert "HH:MM" → Date(TODAY in SRI LANKA TIME)
 function timeStringToDate(timeStr) {
   if (!timeStr) return null;
   const [h, m] = timeStr.split(":").map(Number);
   if (isNaN(h) || isNaN(m)) return null;
 
-  const d = new Date();
-  d.setHours(h, m, 0, 0);
+  const now = new Date();
+  const d = new Date(
+    now.getFullYear(),
+    now.getMonth(),
+    now.getDate(),
+    h,
+    m,
+    0,
+    0
+  );
+
   return d;
 }
 
-// ✅ REALTIME TRACKING ENGINE
+// ✅ ✅ ✅ REALTIME TRACKING ENGINE (FIXED)
 export function startRealTimeTracking(io) {
   io.on("connection", (socket) => {
     console.log("⚡ Client connected:", socket.id);
@@ -60,7 +70,7 @@ export function startRealTimeTracking(io) {
       if (!socket.data.stop) return;
 
       // ----------------------
-      // 1️⃣ Read Firebase GPS
+      // 1️⃣ READ FIREBASE GPS
       // ----------------------
       let gps;
       try {
@@ -77,7 +87,7 @@ export function startRealTimeTracking(io) {
       const busSpeed = Math.max(Number(gps.speed) || 0, MIN_SPEED);
 
       // ----------------------
-      // 2️⃣ Road Distance
+      // 2️⃣ ROAD DISTANCE
       // ----------------------
       let roadKm = await getRoadDistance(
         busLat,
@@ -87,20 +97,23 @@ export function startRealTimeTracking(io) {
       );
 
       // ----------------------
-      // 3️⃣ REAL ETA FROM NOW
+      // 3️⃣ ETA FROM *NOW*
       // ----------------------
       let etaMin = Math.round(roadKm / (busSpeed / 60));
       if (etaMin < 1) etaMin = 1;
 
-      const actualArrival = new Date(Date.now() + etaMin * 60000);
-      const actualFormatted = actualArrival.toLocaleTimeString([], {
+      const now = new Date(); // ✅ SRI LANKA TIME
+      const actualArrival = new Date(now.getTime() + etaMin * 60000);
+
+      const actualFormatted = actualArrival.toLocaleTimeString("en-US", {
+        timeZone: "Asia/Colombo",
         hour: "2-digit",
         minute: "2-digit",
         hour12: false,
       });
 
       // ----------------------
-      // 4️⃣ Get Schedule
+      // 4️⃣ GET SCHEDULE FROM DB
       // ----------------------
       const haltName = normalizeName(socket.data.stop.stopName);
 
@@ -122,12 +135,12 @@ export function startRealTimeTracking(io) {
         return;
       }
 
-      // ✅ USE FIRST BUS ONLY (REAL TRACKED BUS)
+      // ✅ FIRST BUS ONLY
       const scheduledTime = halt.buses[0].expectedTime;
       const scheduledDate = timeStringToDate(scheduledTime);
 
       // ----------------------
-      // 5️⃣ REAL DELAY LOGIC
+      // 5️⃣ ✅ REAL DELAY LOGIC (FIXED)
       // ----------------------
       let status = "On Time";
 
@@ -136,8 +149,9 @@ export function startRealTimeTracking(io) {
           (actualArrival - scheduledDate) / 60000
         );
 
-        if (diffMin > 1) status = `${diffMin} Min Delay`;
-        else if (diffMin < -1) status = `${Math.abs(diffMin)} Min Early`;
+        if (diffMin > 2) status = `${diffMin} Min Late`;
+        else if (diffMin < -2)
+          status = `${Math.abs(diffMin)} Min Early`;
       }
 
       console.log("✅ Emitting:", {
@@ -151,7 +165,7 @@ export function startRealTimeTracking(io) {
       });
 
       // ----------------------
-      // 6️⃣ SEND TO FRONTEND
+      // 6️⃣ ✅ SEND TO FRONTEND
       // ----------------------
       socket.emit("timetableUpdate", [
         {

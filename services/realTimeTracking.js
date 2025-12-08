@@ -7,7 +7,7 @@ const FIREBASE_GPS_URL =
   "https://bustracker-4624a-default-rtdb.asia-southeast1.firebasedatabase.app/bus1.json";
 
 const POLL_MS = 3000;
-const MIN_SPEED = 0; // Prevent insane delays when GPS speed = 0
+const MIN_SPEED = 0.5; // ✅ SAFE MINIMUM SPEED (km/h)
 
 // ✅ Normalize halt name
 function normalizeName(name) {
@@ -48,7 +48,7 @@ function timeStringToDate(timeStr) {
   return d;
 }
 
-// ✅ ✅ ✅ REALTIME TRACKING ENGINE (FIXED)
+// ✅ ✅ ✅ REALTIME TRACKING ENGINE (FULLY FIXED)
 export function startRealTimeTracking(io) {
   io.on("connection", (socket) => {
     console.log("⚡ Client connected:", socket.id);
@@ -84,7 +84,13 @@ export function startRealTimeTracking(io) {
 
       const busLat = Number(gps.latitude);
       const busLng = Number(gps.longitude);
-      const busSpeed = Math.max(Number(gps.speed) || 0, MIN_SPEED);
+
+      let busSpeed = Number(gps.speed) || 0;
+
+      // ✅ SAFE SPEED FILTER
+      if (busSpeed < MIN_SPEED) {
+        busSpeed = MIN_SPEED;
+      }
 
       // ----------------------
       // 2️⃣ ROAD DISTANCE
@@ -140,7 +146,7 @@ export function startRealTimeTracking(io) {
       const scheduledDate = timeStringToDate(scheduledTime);
 
       // ----------------------
-      // 5️⃣ ✅ REAL DELAY LOGIC (FIXED)
+      // 5️⃣ ✅ FINAL DELAY LOGIC (WITH NOT COMING RULE)
       // ----------------------
       let status = "On Time";
 
@@ -149,9 +155,18 @@ export function startRealTimeTracking(io) {
           (actualArrival - scheduledDate) / 60000
         );
 
-        if (diffMin > 2) status = `${diffMin} Min Late`;
-        else if (diffMin < -2)
+        // ✅ If delay more than 2 HOURS → BUS NOT COMING
+        if (diffMin > 120) {
+          status = "❌ Bus is not coming";
+        }
+        // ✅ Normal delay
+        else if (diffMin > 2) {
+          status = `${diffMin} Min Late`;
+        }
+        // ✅ Small early only
+        else if (diffMin < -2) {
           status = `${Math.abs(diffMin)} Min Early`;
+        }
       }
 
       console.log("✅ Emitting:", {

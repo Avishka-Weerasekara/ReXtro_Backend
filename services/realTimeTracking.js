@@ -28,7 +28,7 @@ async function getRoadDistance(busLat, busLng, stopLat, stopLng) {
   }
 }
 
-// ✅ Convert "HH:MM" → Date(TODAY)
+// ✅ Convert "HH:MM" → Date(TODAY in Sri Lanka)
 function timeStringToDate(timeStr) {
   if (!timeStr) return null;
   const [h, m] = timeStr.split(":").map(Number);
@@ -46,15 +46,15 @@ function timeStringToDate(timeStr) {
   );
 }
 
-// ✅ ✅ ✅ REALTIME TRACKING ENGINE (FINAL LOGIC)
+// ✅ ✅ ✅ REALTIME TRACKING ENGINE — FINAL VERSION
 export function startRealTimeTracking(io) {
   io.on("connection", (socket) => {
     console.log("⚡ Client connected:", socket.id);
 
     socket.data.stop = null;
-    socket.data.lowSpeedSince = null; // ✅ Track when low speed started
-    socket.data.lastStatus = "On Time"; // ✅ Store previous delay status
-    socket.data.lastActualTime = "--"; // ✅ Store previous ETA
+    socket.data.lowSpeedSince = null;
+    socket.data.lastStatus = "On Time";
+    socket.data.lastActualTime = "--";
 
     socket.on("requestTimetable", (data) => {
       socket.data.stop = {
@@ -87,16 +87,16 @@ export function startRealTimeTracking(io) {
       const now = new Date();
 
       // ----------------------
-      // 2️⃣ LOW SPEED TIMER LOGIC
+      // 2️⃣ LOW SPEED TIMER
       // ----------------------
-      let isLowSpeed = rawSpeed < MIN_SPEED;
+      const isLowSpeed = rawSpeed < MIN_SPEED;
 
       if (isLowSpeed) {
         if (!socket.data.lowSpeedSince) {
-          socket.data.lowSpeedSince = now; // ✅ Start 20 min timer
+          socket.data.lowSpeedSince = now;
         }
       } else {
-        socket.data.lowSpeedSince = null; // ✅ Reset timer when moving
+        socket.data.lowSpeedSince = null;
       }
 
       const lowSpeedMinutes = socket.data.lowSpeedSince
@@ -114,7 +114,7 @@ export function startRealTimeTracking(io) {
       );
 
       // ----------------------
-      // 4️⃣ ETA (ONLY IF SPEED IS NORMAL)
+      // 4️⃣ ETA (ONLY IF SPEED NORMAL)
       // ----------------------
       let etaMin = null;
       let actualArrival = null;
@@ -165,28 +165,29 @@ export function startRealTimeTracking(io) {
       const scheduledDate = timeStringToDate(scheduledTime);
 
       // ----------------------
-      // 6️⃣ ✅ FINAL STATUS LOGIC
+      // 6️⃣ ✅ FINAL STATUS LOGIC (ALL RULES)
       // ----------------------
       let status = socket.data.lastStatus;
 
       if (scheduledDate && actualArrival) {
-        const diffMin = Math.round(
-          (actualArrival - scheduledDate) / 60000
-        );
+        const diffMs = actualArrival - scheduledDate;
+        const diffMin = Math.round(diffMs / 60000);
 
-        // ✅ CONDITION: LOW SPEED > 20 MIN AND DELAY > 2 HOURS
+        const isNextDay =
+          actualArrival.getDate() !== scheduledDate.getDate();
+
         if (lowSpeedMinutes >= LOW_SPEED_LIMIT_MIN && diffMin > 120) {
           status = "❌ Bus is not coming";
-        }
-        // ✅ NORMAL DELAY
+        } 
+        else if (isNextDay) {
+          status = `${diffMin} Min Late`; // ✅ NEVER EARLY ON NEXT DAY
+        } 
         else if (diffMin > 2) {
           status = `${diffMin} Min Late`;
-        }
-        // ✅ EARLY
+        } 
         else if (diffMin < -2) {
           status = `${Math.abs(diffMin)} Min Early`;
-        }
-        // ✅ ON TIME
+        } 
         else {
           status = "On Time";
         }

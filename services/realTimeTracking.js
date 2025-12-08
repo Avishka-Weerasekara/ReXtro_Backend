@@ -7,7 +7,7 @@ const FIREBASE_GPS_URL =
   "https://bustracker-4624a-default-rtdb.asia-southeast1.firebasedatabase.app/bus1.json";
 
 const POLL_MS = 3000;
-const MIN_SPEED = 5; // Prevent insane delays when GPS speed = 0
+const MIN_SPEED = 0; // Prevent insane delays when GPS speed = 0
 
 // ✅ Normalize halt name
 function normalizeName(name) {

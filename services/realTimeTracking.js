@@ -6,7 +6,7 @@ process.env.TZ = "Asia/Colombo";
 const FIREBASE_GPS_URL =
   "https://bustracker-4624a-default-rtdb.asia-southeast1.firebasedatabase.app/bus1.json";
 
-const POLL_MS = 3000;
+const POLL_MS = 2000;
 const MIN_SPEED = 0.5;
 const LOW_SPEED_LIMIT_MIN = 20; // ✅ 20 minutes
 

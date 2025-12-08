@@ -1,13 +1,14 @@
 import axios from "axios";
 import BusSchedule from "../models/BusSchedule.js";
 
-process.env.TZ = "Asia/Colombo"; // ✅ FORCE SRI LANKA TIME
+process.env.TZ = "Asia/Colombo";
 
 const FIREBASE_GPS_URL =
   "https://bustracker-4624a-default-rtdb.asia-southeast1.firebasedatabase.app/bus1.json";
 
 const POLL_MS = 3000;
-const MIN_SPEED = 0.5; // ✅ SAFE MINIMUM SPEED (km/h)
+const MIN_SPEED = 0.5;
+const LOW_SPEED_LIMIT_MIN = 20; // ✅ 20 minutes
 
 // ✅ Normalize halt name
 function normalizeName(name) {
@@ -22,20 +23,19 @@ async function getRoadDistance(busLat, busLng, stopLat, stopLng) {
 
     if (!res.data.routes?.length) return 1;
     return res.data.routes[0].distance / 1000;
-  } catch (err) {
-    console.log("OSRM error:", err.message);
-    return 1; // ✅ NEVER break system
+  } catch {
+    return 1;
   }
 }
 
-// ✅ Convert "HH:MM" → Date(TODAY in SRI LANKA TIME)
+// ✅ Convert "HH:MM" → Date(TODAY)
 function timeStringToDate(timeStr) {
   if (!timeStr) return null;
   const [h, m] = timeStr.split(":").map(Number);
   if (isNaN(h) || isNaN(m)) return null;
 
   const now = new Date();
-  const d = new Date(
+  return new Date(
     now.getFullYear(),
     now.getMonth(),
     now.getDate(),
@@ -44,26 +44,24 @@ function timeStringToDate(timeStr) {
     0,
     0
   );
-
-  return d;
 }
 
-// ✅ ✅ ✅ REALTIME TRACKING ENGINE (FULLY FIXED)
+// ✅ ✅ ✅ REALTIME TRACKING ENGINE (FINAL LOGIC)
 export function startRealTimeTracking(io) {
   io.on("connection", (socket) => {
     console.log("⚡ Client connected:", socket.id);
 
     socket.data.stop = null;
+    socket.data.lowSpeedSince = null; // ✅ Track when low speed started
+    socket.data.lastStatus = "On Time"; // ✅ Store previous delay status
+    socket.data.lastActualTime = "--"; // ✅ Store previous ETA
 
-    // ✅ Passenger selects halt
     socket.on("requestTimetable", (data) => {
       socket.data.stop = {
         stopName: data.stopName,
         lat: Number(data.lat),
         lng: Number(data.lng),
       };
-
-      console.log("📍 Passenger selected stop:", data.stopName);
     });
 
     const timer = setInterval(async () => {
@@ -84,18 +82,31 @@ export function startRealTimeTracking(io) {
 
       const busLat = Number(gps.latitude);
       const busLng = Number(gps.longitude);
+      const rawSpeed = Number(gps.speed) || 0;
 
-      let busSpeed = Number(gps.speed) || 0;
+      const now = new Date();
 
-      // ✅ SAFE SPEED FILTER
-      if (busSpeed < MIN_SPEED) {
-        busSpeed = MIN_SPEED;
+      // ----------------------
+      // 2️⃣ LOW SPEED TIMER LOGIC
+      // ----------------------
+      let isLowSpeed = rawSpeed < MIN_SPEED;
+
+      if (isLowSpeed) {
+        if (!socket.data.lowSpeedSince) {
+          socket.data.lowSpeedSince = now; // ✅ Start 20 min timer
+        }
+      } else {
+        socket.data.lowSpeedSince = null; // ✅ Reset timer when moving
       }
 
+      const lowSpeedMinutes = socket.data.lowSpeedSince
+        ? Math.round((now - socket.data.lowSpeedSince) / 60000)
+        : 0;
+
       // ----------------------
-      // 2️⃣ ROAD DISTANCE
+      // 3️⃣ ROAD DISTANCE
       // ----------------------
-      let roadKm = await getRoadDistance(
+      const roadKm = await getRoadDistance(
         busLat,
         busLng,
         socket.data.stop.lat,
@@ -103,23 +114,32 @@ export function startRealTimeTracking(io) {
       );
 
       // ----------------------
-      // 3️⃣ ETA FROM *NOW*
+      // 4️⃣ ETA (ONLY IF SPEED IS NORMAL)
       // ----------------------
-      let etaMin = Math.round(roadKm / (busSpeed / 60));
-      if (etaMin < 1) etaMin = 1;
+      let etaMin = null;
+      let actualArrival = null;
+      let actualFormatted = socket.data.lastActualTime;
 
-      const now = new Date(); // ✅ SRI LANKA TIME
-      const actualArrival = new Date(now.getTime() + etaMin * 60000);
+      if (!isLowSpeed) {
+        const safeSpeed = Math.max(rawSpeed, MIN_SPEED);
 
-      const actualFormatted = actualArrival.toLocaleTimeString("en-US", {
-        timeZone: "Asia/Colombo",
-        hour: "2-digit",
-        minute: "2-digit",
-        hour12: false,
-      });
+        etaMin = Math.round(roadKm / (safeSpeed / 60));
+        if (etaMin < 1) etaMin = 1;
+
+        actualArrival = new Date(now.getTime() + etaMin * 60000);
+
+        actualFormatted = actualArrival.toLocaleTimeString("en-US", {
+          timeZone: "Asia/Colombo",
+          hour: "2-digit",
+          minute: "2-digit",
+          hour12: false,
+        });
+
+        socket.data.lastActualTime = actualFormatted;
+      }
 
       // ----------------------
-      // 4️⃣ GET SCHEDULE FROM DB
+      // 5️⃣ GET SCHEDULE
       // ----------------------
       const haltName = normalizeName(socket.data.stop.stopName);
 
@@ -141,46 +161,47 @@ export function startRealTimeTracking(io) {
         return;
       }
 
-      // ✅ FIRST BUS ONLY
       const scheduledTime = halt.buses[0].expectedTime;
       const scheduledDate = timeStringToDate(scheduledTime);
 
       // ----------------------
-      // 5️⃣ ✅ FINAL DELAY LOGIC (WITH NOT COMING RULE)
+      // 6️⃣ ✅ FINAL STATUS LOGIC
       // ----------------------
-      let status = "On Time";
+      let status = socket.data.lastStatus;
 
-      if (scheduledDate) {
+      if (scheduledDate && actualArrival) {
         const diffMin = Math.round(
           (actualArrival - scheduledDate) / 60000
         );
 
-        // ✅ If delay more than 2 HOURS → BUS NOT COMING
-        if (diffMin > 120) {
+        // ✅ CONDITION: LOW SPEED > 20 MIN AND DELAY > 2 HOURS
+        if (lowSpeedMinutes >= LOW_SPEED_LIMIT_MIN && diffMin > 120) {
           status = "❌ Bus is not coming";
         }
-        // ✅ Normal delay
+        // ✅ NORMAL DELAY
         else if (diffMin > 2) {
           status = `${diffMin} Min Late`;
         }
-        // ✅ Small early only
+        // ✅ EARLY
         else if (diffMin < -2) {
           status = `${Math.abs(diffMin)} Min Early`;
         }
+        // ✅ ON TIME
+        else {
+          status = "On Time";
+        }
+
+        socket.data.lastStatus = status;
       }
 
-      console.log("✅ Emitting:", {
-        stop: socket.data.stop.stopName,
-        speed: busSpeed,
-        roadKm,
-        etaMin,
-        scheduledTime,
-        actualFormatted,
-        status,
-      });
+      // ✅ When speed < 0.5 → show PREVIOUS delay & ETA
+      if (isLowSpeed) {
+        status = socket.data.lastStatus;
+        actualFormatted = socket.data.lastActualTime;
+      }
 
       // ----------------------
-      // 6️⃣ ✅ SEND TO FRONTEND
+      // 7️⃣ SEND TO FRONTEND
       // ----------------------
       socket.emit("timetableUpdate", [
         {
@@ -191,7 +212,7 @@ export function startRealTimeTracking(io) {
           actual: actualFormatted,
           status,
           roadKm: roadKm.toFixed(2),
-          speed: busSpeed.toFixed(1),
+          speed: rawSpeed.toFixed(2),
         },
       ]);
     }, POLL_MS);

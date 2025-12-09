@@ -6,7 +6,7 @@ process.env.TZ = "Asia/Colombo";
 const FIREBASE_GPS_URL =
   "https://bustracker-4624a-default-rtdb.asia-southeast1.firebasedatabase.app/bus1.json";
 
-const POLL_MS = 2000;
+const POLL_MS = 2000; // ✅ 2 second updates
 const MIN_SPEED = 0.5;
 const LOW_SPEED_LIMIT_MIN = 20; // ✅ 20 minutes
 
@@ -28,7 +28,7 @@ async function getRoadDistance(busLat, busLng, stopLat, stopLng) {
   }
 }
 
-// ✅ Convert "HH:MM" → Date(TODAY in Sri Lanka)
+// ✅ Convert "HH:MM" → Date(TODAY)
 function timeStringToDate(timeStr) {
   if (!timeStr) return null;
   const [h, m] = timeStr.split(":").map(Number);
@@ -46,7 +46,7 @@ function timeStringToDate(timeStr) {
   );
 }
 
-// ✅ ✅ ✅ REALTIME TRACKING ENGINE — FINAL VERSION
+// ✅ ✅ ✅ REALTIME TRACKING ENGINE — FINAL (NO EARLY)
 export function startRealTimeTracking(io) {
   io.on("connection", (socket) => {
     console.log("⚡ Client connected:", socket.id);
@@ -114,16 +114,15 @@ export function startRealTimeTracking(io) {
       );
 
       // ----------------------
-      // 4️⃣ ETA (ONLY IF SPEED NORMAL)
+      // 4️⃣ ETA (ONLY IF MOVING)
       // ----------------------
-      let etaMin = null;
       let actualArrival = null;
       let actualFormatted = socket.data.lastActualTime;
 
       if (!isLowSpeed) {
         const safeSpeed = Math.max(rawSpeed, MIN_SPEED);
 
-        etaMin = Math.round(roadKm / (safeSpeed / 60));
+        let etaMin = Math.round(roadKm / (safeSpeed / 60));
         if (etaMin < 1) etaMin = 1;
 
         actualArrival = new Date(now.getTime() + etaMin * 60000);
@@ -165,29 +164,31 @@ export function startRealTimeTracking(io) {
       const scheduledDate = timeStringToDate(scheduledTime);
 
       // ----------------------
-      // 6️⃣ ✅ FINAL STATUS LOGIC (ALL RULES)
+      // 6️⃣ ✅ FINAL STATUS LOGIC (NO EARLY AT ALL)
       // ----------------------
       let status = socket.data.lastStatus;
 
       if (scheduledDate && actualArrival) {
-        const diffMs = actualArrival - scheduledDate;
-        const diffMin = Math.round(diffMs / 60000);
+        const diffMin = Math.round(
+          (actualArrival - scheduledDate) / 60000
+        );
 
         const isNextDay =
           actualArrival.getDate() !== scheduledDate.getDate();
 
+        // ✅ Bus not coming rule
         if (lowSpeedMinutes >= LOW_SPEED_LIMIT_MIN && diffMin > 120) {
           status = "❌ Bus is not coming";
-        } 
+        }
+        // ✅ Always Late if next day
         else if (isNextDay) {
-          status = `${diffMin} Min Late`; // ✅ NEVER EARLY ON NEXT DAY
-        } 
+          status = `${diffMin} Min Late`;
+        }
+        // ✅ Normal Late
         else if (diffMin > 2) {
           status = `${diffMin} Min Late`;
-        } 
-        else if (diffMin < -2) {
-          status = `${Math.abs(diffMin)} Min Early`;
-        } 
+        }
+        // ✅ Otherwise always On Time
         else {
           status = "On Time";
         }

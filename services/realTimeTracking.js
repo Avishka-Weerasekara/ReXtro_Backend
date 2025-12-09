@@ -19,7 +19,6 @@ async function getRoadDistance(busLat, busLng, stopLat, stopLng) {
   try {
     const URL = `https://router.project-osrm.org/route/v1/driving/${busLng},${busLat};${stopLng},${stopLat}?overview=false`;
     const res = await axios.get(URL);
-
     if (!res.data.routes?.length) return 1;
     return res.data.routes[0].distance / 1000;
   } catch {
@@ -31,8 +30,6 @@ async function getRoadDistance(busLat, busLng, stopLat, stopLng) {
 function timeStringToDate(timeStr) {
   if (!timeStr) return null;
   const [h, m] = timeStr.split(":").map(Number);
-  if (isNaN(h) || isNaN(m)) return null;
-
   const now = new Date();
   return new Date(
     now.getFullYear(),
@@ -45,7 +42,7 @@ function timeStringToDate(timeStr) {
   );
 }
 
-// ✅ ✅ ✅ REALTIME TRACKING ENGINE — FINAL
+// ✅ ✅ ✅ FINAL REALTIME TRACKING ENGINE
 export function startRealTimeTracking(io) {
   io.on("connection", (socket) => {
     console.log("⚡ Client connected:", socket.id);
@@ -81,7 +78,6 @@ export function startRealTimeTracking(io) {
       const busLat = Number(gps.latitude);
       const busLng = Number(gps.longitude);
       const rawSpeed = Number(gps.speed) || 0;
-
       const now = new Date();
 
       const isLowSpeed = rawSpeed < MIN_SPEED;
@@ -104,7 +100,6 @@ export function startRealTimeTracking(io) {
 
       if (!isLowSpeed) {
         const safeSpeed = Math.max(rawSpeed, MIN_SPEED);
-
         let etaMin = Math.round(roadKm / (safeSpeed / 60));
         if (etaMin < 1) etaMin = 1;
 
@@ -147,31 +142,26 @@ export function startRealTimeTracking(io) {
       const scheduledDate = timeStringToDate(scheduledTime);
 
       // ----------------------
-      // 5️⃣ ✅ FINAL STATUS LOGIC
+      // ✅✅✅ 5️⃣ FINAL STATUS LOGIC (HARD 2 HOUR CUT)
       // ----------------------
       let status = socket.data.lastStatus;
 
       if (scheduledDate && actualArrival) {
         const diffMin = Math.round(
-          (actualArrival - scheduledDate) / 60000
-        );
+          Math.abs(actualArrival - scheduledDate) / 60000
+        ); // ✅ ABSOLUTE DIFFERENCE
 
-        const isNextDay =
-          actualArrival.getDate() !== scheduledDate.getDate();
+        const isLate = actualArrival > scheduledDate;
 
-        // ✅ RULE 1: Delay > 2 hours → BUS NOT COMING
+        // ✅ OVER 2 HOURS → BUS NOT COMING
         if (diffMin > 120) {
           status = "❌ Bus is not coming";
         }
-        // ✅ RULE 2: Always Late if next day
-        else if (isNextDay) {
+        // ✅ NORMAL LATE
+        else if (isLate && diffMin > 2) {
           status = `${diffMin} Min Late`;
         }
-        // ✅ RULE 3: Normal Late
-        else if (diffMin > 2) {
-          status = `${diffMin} Min Late`;
-        }
-        // ✅ RULE 4: Otherwise always On Time (NO EARLY)
+        // ✅ OTHERWISE → ON TIME
         else {
           status = "On Time";
         }
@@ -179,7 +169,7 @@ export function startRealTimeTracking(io) {
         socket.data.lastStatus = status;
       }
 
-      // ✅ When speed < 0.5 → show PREVIOUS delay & ETA
+      // ✅ LOW SPEED → FREEZE STATUS
       if (isLowSpeed) {
         status = socket.data.lastStatus;
         actualFormatted = socket.data.lastActualTime;

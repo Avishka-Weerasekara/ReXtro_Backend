@@ -162,9 +162,7 @@ export function startRealTimeTracking(io) {
           status = `${diffMin} Min Late`;
         }
         // ✅ OTHERWISE → ON TIME
-        else {
-          status = "On Time";
-        }
+      
 
         socket.data.lastStatus = status;
       }

@@ -8,7 +8,6 @@ const FIREBASE_GPS_URL =
 
 const POLL_MS = 2000; // ✅ 2 second updates
 const MIN_SPEED = 0.5;
-const LOW_SPEED_LIMIT_MIN = 20; // ✅ 20 minutes
 
 // ✅ Normalize halt name
 function normalizeName(name) {
@@ -46,13 +45,12 @@ function timeStringToDate(timeStr) {
   );
 }
 
-// ✅ ✅ ✅ REALTIME TRACKING ENGINE — FINAL (NO EARLY)
+// ✅ ✅ ✅ REALTIME TRACKING ENGINE — FINAL
 export function startRealTimeTracking(io) {
   io.on("connection", (socket) => {
     console.log("⚡ Client connected:", socket.id);
 
     socket.data.stop = null;
-    socket.data.lowSpeedSince = null;
     socket.data.lastStatus = "On Time";
     socket.data.lastActualTime = "--";
 
@@ -86,25 +84,10 @@ export function startRealTimeTracking(io) {
 
       const now = new Date();
 
-      // ----------------------
-      // 2️⃣ LOW SPEED TIMER
-      // ----------------------
       const isLowSpeed = rawSpeed < MIN_SPEED;
 
-      if (isLowSpeed) {
-        if (!socket.data.lowSpeedSince) {
-          socket.data.lowSpeedSince = now;
-        }
-      } else {
-        socket.data.lowSpeedSince = null;
-      }
-
-      const lowSpeedMinutes = socket.data.lowSpeedSince
-        ? Math.round((now - socket.data.lowSpeedSince) / 60000)
-        : 0;
-
       // ----------------------
-      // 3️⃣ ROAD DISTANCE
+      // 2️⃣ ROAD DISTANCE
       // ----------------------
       const roadKm = await getRoadDistance(
         busLat,
@@ -114,7 +97,7 @@ export function startRealTimeTracking(io) {
       );
 
       // ----------------------
-      // 4️⃣ ETA (ONLY IF MOVING)
+      // 3️⃣ ETA (ONLY IF MOVING)
       // ----------------------
       let actualArrival = null;
       let actualFormatted = socket.data.lastActualTime;
@@ -138,7 +121,7 @@ export function startRealTimeTracking(io) {
       }
 
       // ----------------------
-      // 5️⃣ GET SCHEDULE
+      // 4️⃣ GET SCHEDULE
       // ----------------------
       const haltName = normalizeName(socket.data.stop.stopName);
 
@@ -164,7 +147,7 @@ export function startRealTimeTracking(io) {
       const scheduledDate = timeStringToDate(scheduledTime);
 
       // ----------------------
-      // 6️⃣ ✅ FINAL STATUS LOGIC (NO EARLY AT ALL)
+      // 5️⃣ ✅ FINAL STATUS LOGIC
       // ----------------------
       let status = socket.data.lastStatus;
 
@@ -176,19 +159,19 @@ export function startRealTimeTracking(io) {
         const isNextDay =
           actualArrival.getDate() !== scheduledDate.getDate();
 
-        // ✅ Bus not coming rule
-        if (lowSpeedMinutes >= LOW_SPEED_LIMIT_MIN && diffMin > 120) {
+        // ✅ RULE 1: Delay > 2 hours → BUS NOT COMING
+        if (diffMin > 120) {
           status = "❌ Bus is not coming";
         }
-        // ✅ Always Late if next day
+        // ✅ RULE 2: Always Late if next day
         else if (isNextDay) {
           status = `${diffMin} Min Late`;
         }
-        // ✅ Normal Late
+        // ✅ RULE 3: Normal Late
         else if (diffMin > 2) {
           status = `${diffMin} Min Late`;
         }
-        // ✅ Otherwise always On Time
+        // ✅ RULE 4: Otherwise always On Time (NO EARLY)
         else {
           status = "On Time";
         }
@@ -203,7 +186,7 @@ export function startRealTimeTracking(io) {
       }
 
       // ----------------------
-      // 7️⃣ SEND TO FRONTEND
+      // 6️⃣ SEND TO FRONTEND
       // ----------------------
       socket.emit("timetableUpdate", [
         {

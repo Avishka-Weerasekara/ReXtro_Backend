@@ -6,7 +6,7 @@ process.env.TZ = "Asia/Colombo";
 const FIREBASE_GPS_URL =
   "https://bustracker-4624a-default-rtdb.asia-southeast1.firebasedatabase.app/bus1.json";
 
-const POLL_MS = 2000; // ✅ 2 second updates
+const POLL_MS = 5000; // ✅ 5 second updates
 const MIN_SPEED = 0.5;
 
 // ✅ Normalize halt name
@@ -42,14 +42,16 @@ function timeStringToDate(timeStr) {
   );
 }
 
-// ✅ ✅ ✅ FINAL REALTIME TRACKING ENGINE
+// ✅ ✅ ✅ FINAL REALTIME TRACKING ENGINE (YOUR NEW LOGIC)
 export function startRealTimeTracking(io) {
   io.on("connection", (socket) => {
     console.log("⚡ Client connected:", socket.id);
 
     socket.data.stop = null;
+
     socket.data.lastStatus = "On Time";
     socket.data.lastActualTime = "--";
+    socket.data.lastDelayMin = 0;
 
     socket.on("requestTimetable", (data) => {
       socket.data.stop = {
@@ -142,34 +144,50 @@ export function startRealTimeTracking(io) {
       const scheduledDate = timeStringToDate(scheduledTime);
 
       // ----------------------
-      // ✅✅✅ 5️⃣ FINAL STATUS LOGIC (HARD 2 HOUR CUT)
+      // ✅✅✅ 5️⃣ FINAL STATUS LOGIC (YOUR EXACT RULES)
       // ----------------------
       let status = socket.data.lastStatus;
 
       if (scheduledDate && actualArrival) {
         const diffMin = Math.round(
-          Math.abs(actualArrival - scheduledDate) / 60000
-        ); // ✅ ABSOLUTE DIFFERENCE
+          (actualArrival - scheduledDate) / 60000
+        );
 
-        const isLate = actualArrival > scheduledDate;
+        const isLate = diffMin > 0;
+        const absDelay = Math.abs(diffMin);
 
-        // ✅ OVER 2 HOURS → BUS NOT COMING
-        if (diffMin > 120) {
-          status = "❌ Bus is not coming";
+        // ✅ BUS MOVING → RECALCULATE EVERYTHING
+        if (!isLowSpeed) {
+          if (absDelay > 60) {
+            status = "❌ Bus is not coming";
+          } 
+          else if (isLate && absDelay > 2) {
+            status = `${absDelay} Min Late`;
+          } 
+          else {
+            status = "On Time";
+          }
+
+          socket.data.lastStatus = status;
+          socket.data.lastDelayMin = absDelay;
         }
-        // ✅ NORMAL LATE
-        else if (isLate && diffMin > 2) {
-          status = `${diffMin} Min Late`;
-        }
-        // ✅ OTHERWISE → ON TIME
-      
-
-        socket.data.lastStatus = status;
       }
 
-      // ✅ LOW SPEED → FREEZE STATUS
+      // ✅ BUS STOPPED LOGIC
       if (isLowSpeed) {
-        status = socket.data.lastStatus;
+        // ✅ If stopped AND delay > 60 min → Bus not coming
+        if (socket.data.lastDelayMin > 60) {
+          status = "❌ Bus is not coming";
+        }
+        // ✅ If stopped AND delay > 10 min → KEEP PREVIOUS DELAY
+        else if (socket.data.lastDelayMin > 10) {
+          status = socket.data.lastStatus;
+        }
+        // ✅ Otherwise normal freeze
+        else {
+          status = socket.data.lastStatus;
+        }
+
         actualFormatted = socket.data.lastActualTime;
       }
 

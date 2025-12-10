@@ -42,7 +42,7 @@ function timeStringToDate(timeStr) {
   );
 }
 
-// ✅ ✅ ✅ FINAL REALTIME TRACKING ENGINE (YOUR NEW LOGIC)
+// ✅ ✅ ✅ FINAL REALTIME TRACKING ENGINE
 export function startRealTimeTracking(io) {
   io.on("connection", (socket) => {
     console.log("⚡ Client connected:", socket.id);
@@ -144,7 +144,7 @@ export function startRealTimeTracking(io) {
       const scheduledDate = timeStringToDate(scheduledTime);
 
       // ----------------------
-      // ✅✅✅ 5️⃣ FINAL STATUS LOGIC (YOUR EXACT RULES)
+      // ✅✅✅ 5️⃣ FINAL STATUS LOGIC
       // ----------------------
       let status = socket.data.lastStatus;
 
@@ -153,10 +153,10 @@ export function startRealTimeTracking(io) {
           (actualArrival - scheduledDate) / 60000
         );
 
-        const isLate = diffMin > 0;
         const absDelay = Math.abs(diffMin);
+        const isLate = diffMin > 0;
 
-        // ✅ BUS MOVING → RECALCULATE EVERYTHING
+        // ✅ BUS IS MOVING → UPDATE LIVE
         if (!isLowSpeed) {
           if (absDelay > 60) {
             status = "❌ Bus is not coming";
@@ -173,23 +173,24 @@ export function startRealTimeTracking(io) {
         }
       }
 
-      // ✅ BUS STOPPED LOGIC
+      // ✅ BUS IS STOPPED → FREEZE / CANCEL LOGIC
       if (isLowSpeed) {
-        // ✅ If stopped AND delay > 60 min → Bus not coming
         if (socket.data.lastDelayMin > 60) {
           status = "❌ Bus is not coming";
-        }
-        // ✅ If stopped AND delay > 10 min → KEEP PREVIOUS DELAY
+        } 
         else if (socket.data.lastDelayMin > 10) {
-          status = socket.data.lastStatus;
-        }
-        // ✅ Otherwise normal freeze
+          status = socket.data.lastStatus; // ✅ Freeze previous delay
+        } 
         else {
           status = socket.data.lastStatus;
         }
 
         actualFormatted = socket.data.lastActualTime;
       }
+
+      // ✅ HIDE EXPECTED TIME IF DELAY > 60 MIN
+      const expectedToSend =
+        socket.data.lastDelayMin > 60 ? "--" : actualFormatted;
 
       // ----------------------
       // 6️⃣ SEND TO FRONTEND
@@ -200,7 +201,7 @@ export function startRealTimeTracking(io) {
           from: "Wakwella",
           to: "Galle",
           scheduled: scheduledTime,
-          actual: actualFormatted,
+          actual: expectedToSend, // ✅ HIDDEN WHEN > 60 MIN
           status,
           roadKm: roadKm.toFixed(2),
           speed: rawSpeed.toFixed(2),
